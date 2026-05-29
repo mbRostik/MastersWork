@@ -1,0 +1,37 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>3f6f2275-69de-4dab-80a0-b43fd525e482</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.26.0" />
+    <PackageReference Include="Grpc.Net.Client" Version="2.61.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.62.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.3" />
+    <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.19.6" />
+    <PackageReference Include="Polly" Version="8.3.1" />
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.1" />
+    <PackageReference Include="Serilog.Enrichers.Environment" Version="2.3.0" />
+    <PackageReference Include="Serilog.Sinks.Elasticsearch" Version="10.0.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Aggregator.Application\Aggregator.Application.csproj" />
+    <ProjectReference Include="..\Aggregator.Infrastructure\Aggregator.Infrastructure.csproj" />
+  </ItemGroup>
+
+
+	<ItemGroup>
+		<Protobuf Include="..\Aggregator.Application\Contracts\protos\ChatProtos\userchats.proto" GrpcServices="Client" />
+		<Protobuf Include="..\Aggregator.Application\Contracts\protos\UserProtos\userforchat.proto" GrpcServices="Client" />
+
+	</ItemGroup>
+</Project>

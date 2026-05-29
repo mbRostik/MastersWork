@@ -1,0 +1,252 @@
+﻿{
+  "Routes": [
+    {
+      "UpstreamPathTemplate": "/check/polly",
+      "UpstreamHttpMethod": [ "Get" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7028
+        }
+      ],
+      "DownstreamPathTemplate": "/Post/GetAllPosts",
+      "QoSOptions": {
+        "ExceptionsAllowedBeforeBreaking": 5,
+        "DurationOfBreak": 10000,
+        "TimeoutValue": 2000
+      }
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/user",
+      "UpstreamHttpMethod": [ "Get" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7075
+        }
+      ],
+      "DownstreamPathTemplate": "/User/GetUsersProfile"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/GetUserFriends",
+      "UpstreamHttpMethod": [ "Get" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7075
+        }
+      ],
+      "DownstreamPathTemplate": "/User/GetUserFriends"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/userUpdate",
+      "UpstreamHttpMethod": [ "Post" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7075
+        }
+      ],
+      "DownstreamPathTemplate": "/User/ChangeUserSettings"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/userProfilePhotoUpload",
+      "UpstreamHttpMethod": [ "Post" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7075
+        }
+      ],
+      "DownstreamPathTemplate": "/User/UploadProfilePhoto"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/SomeonesProfile",
+      "UpstreamHttpMethod": [ "Post" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7075
+        }
+      ],
+      "DownstreamPathTemplate": "/User/GetSomeonesProfile"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/Follow",
+      "UpstreamHttpMethod": [ "Post" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7075
+        }
+      ],
+      "DownstreamPathTemplate": "/User/Follow"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/GetSearchedUsers",
+      "UpstreamHttpMethod": [ "Post" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7075
+        }
+      ],
+      "DownstreamPathTemplate": "/User/GetSearchedUsers"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/GetChatByUserId",
+      "UpstreamHttpMethod": [ "Post" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7234
+        }
+      ],
+      "DownstreamPathTemplate": "/Chat/GetChatId"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/GetUserChats",
+      "UpstreamHttpMethod": [ "Get" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7192
+        }
+      ],
+      "DownstreamPathTemplate": "/Aggregator/GetUserChats"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/GetFollowedPosts",
+      "UpstreamHttpMethod": [ "Get" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7192
+        }
+      ],
+      "DownstreamPathTemplate": "/Aggregator/GetFollowedPosts"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/GetChatMessages",
+      "UpstreamHttpMethod": [ "Post" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7234
+        }
+      ],
+      "DownstreamPathTemplate": "/Chat/GetChatMessages"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/chatHub",
+      "UpstreamHttpMethod": [ "Get", "Post" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7234
+        }
+      ],
+      "DownstreamPathTemplate": "/ChatHub"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/CreatePost",
+      "UpstreamHttpMethod": [ "Post" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7028
+        }
+      ],
+      "DownstreamPathTemplate": "/Post/CreatePost"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/DeleteUserPost",
+      "UpstreamHttpMethod": [ "Post" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7028
+        }
+      ],
+      "DownstreamPathTemplate": "/Post/DeleteUserPost"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/GetUserPosts",
+      "UpstreamHttpMethod": [ "Get" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7028
+        }
+      ],
+      "DownstreamPathTemplate": "/Post/GetUserPosts"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/GetsmbPosts",
+      "UpstreamHttpMethod": [ "Post" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7028
+        }
+      ],
+      "DownstreamPathTemplate": "/Post/GetsmbPosts"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/getrecommendedposts",
+      "UpstreamHttpMethod": [ "Get", "Post" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7028
+        }
+      ],
+      "DownstreamPathTemplate": "/Post/getrecommendedposts"
+    },
+    {
+      "UpstreamPathTemplate": "/ocelot/react",
+      "UpstreamHttpMethod": [ "Post" ],
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "localhost",
+          "Port": 7028
+        }
+      ],
+      "DownstreamPathTemplate": "/Post/react"
+    }
+  ],
+
+  "GlobalConfiguration": {
+    "BaseUrl": "https://localhost:5000",
+    "QoSOptions": {
+      "ExceptionsAllowedBeforeBreaking": 5,
+      "DurationOfBreak": 10000,
+      "TimeoutValue": 2000
+    },
+    "CorsOptions": {
+      "policyName": "CorsPolicy",
+      "allowedOrigins": [ "*" ],
+      "allowedMethods": [ "GET", "POST", "PUT", "DELETE", "OPTIONS" ],
+      "allowedHeaders": [ "*" ]
+    }
+  }
+}
