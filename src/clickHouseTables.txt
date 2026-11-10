@@ -1,0 +1,15 @@
+docker exec -it clickhouse clickhouse-client --user grafana_user --password securepass --database analytics_db
+
+CREATE TABLE IF NOT EXISTS post_analytics
+(
+    event_time DateTime,
+    event_type String,
+    content_quality Float32,
+    sentiment_score Float32,
+    toxicity_score Float32,
+    commitment String,
+    proof_generated Boolean,
+    consensus_result Nullable(String)
+)
+ENGINE = MergeTree()
+ORDER BY (event_time, event_type);
