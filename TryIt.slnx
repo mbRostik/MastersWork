@@ -1,0 +1,39 @@
+<Solution>
+  <Folder Name="/ApiGateWay/">
+    <Project Path="src\ApiGateWay\OcelotGateWay\OcelotGateWay.csproj" />
+  </Folder>
+  <Folder Name="/ApiGateWay/Aggregator/">
+    <Project Path="src\ApiGateWay\Aggregator\Aggregator.Application\Aggregator.Application.csproj" />
+    <Project Path="src\ApiGateWay\Aggregator\Aggregator.Infrastructure\Aggregator.Infrastructure.csproj" />
+    <Project Path="src\ApiGateWay\Aggregator\Aggregator.WebApi\Aggregator.WebApi.csproj" />
+  </Folder>
+  <Folder Name="/certs/">
+    <File Path="src\certs\identityserverapi-api.pfx" />
+    <File Path="src\certs\ocelotgateway-api.pfx" />
+    <File Path="src\certs\postwebapi-api.pfx" />
+    <File Path="src\certs\sagawebapi-api.pfx" />
+    <File Path="src\certs\userwebapi-api.pfx" />
+  </Folder>
+  <Folder Name="/IdentityServer/">
+    <Project Path="src\IdentityServer\IdentityServer.Application\IdentityServer.Application.csproj" />
+    <Project Path="src\IdentityServer\IdentityServer.Domain\IdentityServer.Domain.csproj" />
+    <Project Path="src\IdentityServer\IdentityServer.Infrastructure.Data\IdentityServer.Infrastructure.Data.csproj" />
+    <Project Path="src\IdentityServer\IdentityServer.WebApi\IdentityServer.WebApi.csproj" />
+  </Folder>
+  <Folder Name="/Posts/">
+    <Project Path="src\Posts\Posts.Application\Posts.Application.csproj" />
+    <Project Path="src\Posts\Posts.Domain\Posts.Domain.csproj" />
+    <Project Path="src\Posts\Posts.Infrastructure\Posts.Infrastructure.csproj" />
+    <Project Path="src\Posts\Posts.Infrastructure.Data\Posts.Infrastructure.Data.csproj" />
+    <Project Path="src\Posts\Posts.WebApi\Posts.WebApi.csproj" />
+  </Folder>
+  <Folder Name="/Users/">
+    <Project Path="src\Users\Users.Application\Users.Application.csproj" />
+    <Project Path="src\Users\Users.Domain\Users.Domain.csproj" />
+    <Project Path="src\Users\Users.Infrastructure\Users.Infrastructure.csproj" />
+    <Project Path="src\Users\Users.Infrastructure.Data\Users.Infrastructure.Data.csproj" />
+    <Project Path="src\Users\Users.WebApi\Users.WebApi.csproj" />
+  </Folder>
+  <Project Path="src\MessageBus\MessageBus.csproj" />
+  <Project Path="src\SagasStateMachines.WebApi\SagasStateMachines.WebApi.csproj" />
+</Solution>
