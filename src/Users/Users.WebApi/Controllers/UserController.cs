@@ -5,9 +5,13 @@ using MassTransit;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using Users.Application.Contracts.DTOs;
 using Users.Application.UseCases.Commands;
@@ -27,23 +31,10 @@ namespace Users.WebApi.Controllers
     {
         public class UpdateReputationRequest
         {
-            public string Commitment { get; set; }
-            public string Status { get; set; }
-        }
-
-        public class PostDto
-        {
-            public int Id { get; set; }
-
-            public string Title { get; set; }
-
-            public string Content { get; set; }
-
-            public string UserId { get; set; }
             public string? Commitment { get; set; }
-
-            public DateTime Date { get; set; }
         }
+
+        private sealed record PostOwner(int PostId, string UserId);
 
         private readonly IMediator mediator;
         private readonly HttpClient _httpClient;
@@ -59,34 +50,50 @@ namespace Users.WebApi.Controllers
 
         [HttpPost("updatereputation")]
         [AllowAnonymous]
-        public async Task<IActionResult> UpdateReputation([FromBody] UpdateReputationRequest request)
+        public async Task<IActionResult> UpdateReputation([FromBody] UpdateReputationRequest request,
+            [FromServices] IConfiguration configuration, CancellationToken cancellationToken)
         {
-            string postServiceUrl = $"https://localhost:7028/post/GetUserPostByCommitment/{request.Commitment}";
-            var postResponse = await _httpClient.GetAsync(postServiceUrl);
+            var token = configuration["REPUTATION_SERVICE_TOKEN"];
+            if (string.IsNullOrWhiteSpace(token) || !CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(Request.Headers.Authorization.ToString()), Encoding.UTF8.GetBytes($"Bearer {token}")))
+                return Unauthorized();
 
-            var post = await postResponse.Content.ReadFromJsonAsync<PostDto>();
+            if (request.Commitment == null || !Regex.IsMatch(request.Commitment, @"\A(0|[1-9][0-9]{0,76})\z"))
+                return BadRequest();
 
-            if (post == null)
+            var postServiceUrl = (configuration["POST_SERVICE_URL"] ?? "https://localhost:7028").TrimEnd('/');
+            using var lookup = new HttpRequestMessage(System.Net.Http.HttpMethod.Get, $"{postServiceUrl}/post/GetUserPostByCommitment/{request.Commitment}");
+            lookup.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            using var postResponse = await _httpClient.SendAsync(lookup, cancellationToken);
+            if (postResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+                return NotFound();
+            if (!postResponse.IsSuccessStatusCode)
+                return StatusCode(StatusCodes.Status502BadGateway);
+
+            var owner = await postResponse.Content.ReadFromJsonAsync<PostOwner>(cancellationToken);
+            if (owner == null || owner.PostId <= 0 || string.IsNullOrWhiteSpace(owner.UserId))
+                return StatusCode(StatusCodes.Status502BadGateway);
+
+            await using var transaction = await _UserDbContext.Database.BeginTransactionAsync(cancellationToken);
+            _UserDbContext.ReputationAwards.Add(new ReputationAward { PostId = owner.PostId });
+            try
             {
-                return NotFound(new { message = "Post with this commitment not found." });
+                await _UserDbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException ex) when (ex.InnerException is SqlException { Number: 2601 or 2627 })
+            {
+                // The primary key ensures that concurrent deliveries count once.
+                return NoContent();
             }
 
-            var user = await _UserDbContext.Users
-                .FirstOrDefaultAsync(u => u.Id == post.UserId);
+            var updated = await _UserDbContext.Users.Where(u => u.Id == owner.UserId)
+                .ExecuteUpdateAsync(user => user.SetProperty(u => u.ReputationScore, u => (u.ReputationScore ?? 0) + 1),
+                    cancellationToken);
+            if (updated == 0)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable);
 
-            if (user == null)
-            {
-                return NotFound(new { message = "Author of this post not found." });
-            }
-
-            if(user.ReputationScore == null)
-                user.ReputationScore = 1;
-            else
-                user.ReputationScore += 1;
-
-            await _UserDbContext.SaveChangesAsync();
-
-            return Ok(new { message = "Reputation successfully increased!" });
+            await transaction.CommitAsync(cancellationToken);
+            return NoContent();
         }
 
 

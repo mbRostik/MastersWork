@@ -2,6 +2,7 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Posts.Application.Contracts.Interfaces;
+using Posts.Application.Services;
 using Posts.Application.UseCases.Commands;
 using Posts.Application.UseCases.Notifications;
 using Posts.Domain.Entities;
@@ -9,6 +10,7 @@ using Posts.Infrastructure.Data;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -26,6 +28,7 @@ namespace Posts.Application.UseCases.Handlers.Creation
         public int PostId { get; set; }
         public string Title { get; set; }
         public string Commitment { get; set; }
+        public int CommitmentVersion { get; set; }
         public string Content { get; set; }
         public string UserId { get; set; }
     }
@@ -59,14 +62,35 @@ namespace Posts.Application.UseCases.Handlers.Creation
                     return false;
                 }
                 Post temp = mapper.Map<Post>(request.model);
-                var rawText = $"{temp.Title}. {temp.Content}".Trim();
-                using var sha256 = System.Security.Cryptography.SHA256.Create();
-                var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(rawText));
-                temp.Commitment = Convert.ToHexString(hashBytes).ToLower();
-                var model = await dbContext.Posts.AddAsync(temp);
-                await dbContext.SaveChangesAsync();
+                temp.Title ??= string.Empty;
+                temp.Content ??= string.Empty;
+                await using (var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken))
+                {
+                    dbContext.Posts.Add(temp);
+                    await dbContext.SaveChangesAsync(cancellationToken);
 
-                if(model!=null && model.Entity != null)
+                    temp.CommitmentSalt = RandomNumberGenerator.GetBytes(32);
+                    temp.Commitment = PostProofCommitment.Compute(temp, temp.CommitmentSalt);
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                }
+
+                await _publishEndpoint.Publish<IPostCreated_PublishEvent_From_PostWebApi>(new
+                {
+                    CorrelationId = Guid.NewGuid(),
+                    Data = new PostPublishedDto
+                    {
+                        PostId = temp.Id,
+                        Title = temp.Title,
+                        Content = temp.Content,
+                        UserId = temp.UserId,
+                        Commitment = temp.Commitment,
+                        CommitmentVersion = 1
+                    }
+                }, cancellationToken);
+
+                var model = dbContext.Entry(temp);
+                try
                 {
                     using (var client = new HttpClient())
                     {
@@ -258,28 +282,15 @@ namespace Posts.Application.UseCases.Handlers.Creation
                        
                         logger.Information("Post with ID {PostId} created successfully", model.Entity.Id);
 
-                        var postPayload = new PostPublishedDto
-                        {
-                            PostId = model.Entity.Id,
-                            Title = model.Entity.Title,
-                            Content = model.Entity.Content,
-                            UserId = model.Entity.UserId.ToString(),
-                            Commitment = model.Entity.Commitment
-                        };
-
-                        await _publishEndpoint.Publish<IPostCreated_PublishEvent_From_PostWebApi>(new
-                        {
-                            CorrelationId = Guid.NewGuid(),
-                            Data = postPayload
-                        }, cancellationToken);
-
-                        await mediator.Publish(new PostCreatedNotification(model.Entity), cancellationToken);
-
-                        return true;
                     }
                 }
+                catch (HttpRequestException ex)
+                {
+                    logger.Warning(ex, "Category service unavailable for PostId {PostId}", temp.Id);
+                }
 
-                return false;
+                await mediator.Publish(new PostCreatedNotification(temp), cancellationToken);
+                return true;
 
             }
             catch (Exception ex)

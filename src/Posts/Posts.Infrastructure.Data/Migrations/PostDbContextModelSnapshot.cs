@@ -163,6 +163,14 @@ namespace Posts.Infrastructure.Data.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("Commitment")
+                        .HasMaxLength(77)
+                        .HasColumnType("nvarchar(77)");
+
+                    b.Property<byte[]>("CommitmentSalt")
+                        .HasMaxLength(32)
+                        .HasColumnType("varbinary(32)");
+
                     b.Property<string>("Content")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -179,6 +187,10 @@ namespace Posts.Infrastructure.Data.Migrations
                         .HasColumnType("nvarchar(450)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Commitment")
+                        .IsUnique()
+                        .HasFilter("[Commitment] IS NOT NULL AND [CommitmentSalt] IS NOT NULL");
 
                     b.HasIndex("UserId");
 

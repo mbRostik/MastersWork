@@ -20,6 +20,11 @@ namespace Posts.Infrastructure.Data.EntityTypeConfiguration
               .ValueGeneratedOnAdd()
               .HasAnnotation("DatabaseGenerated", DatabaseGeneratedOption.Identity);
 
+            builder.Property(post => post.Commitment).HasMaxLength(77);
+            builder.Property(post => post.CommitmentSalt).HasMaxLength(32);
+            builder.HasIndex(post => post.Commitment).IsUnique()
+                .HasFilter("[Commitment] IS NOT NULL AND [CommitmentSalt] IS NOT NULL");
+
             builder.HasOne(x=>x.User)
                 .WithMany(x=>x.Posts)
                 .HasForeignKey(x=>x.UserId)

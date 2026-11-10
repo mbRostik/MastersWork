@@ -11,6 +11,9 @@
         public string UserId { get; set; }
         public string? Commitment { get; set; }
 
+        [System.Text.Json.Serialization.JsonIgnore]
+        public byte[]? CommitmentSalt { get; set; }
+
         public DateTime Date { get; set; }
 
         public virtual User User { get; set; }

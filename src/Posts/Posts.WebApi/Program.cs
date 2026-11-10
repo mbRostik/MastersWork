@@ -12,6 +12,7 @@ using Posts.Application.UseCases.Queries;
 using Posts.Infrastructure.Data;
 using Posts.Infrastructure.Services;
 using Posts.Infrastructure.Services.grpcServices;
+using Posts.WebApi.Controllers;
 using RabbitMQ.Client;
 using Serilog;
 using Serilog.Sinks.Elasticsearch;
@@ -123,6 +124,11 @@ public class Program
 
                 options.Audience = "Posts.WebApi";
 
+            })
+            .AddJwtBearer(PostController.PostAuthorScheme, options =>
+            {
+                options.Authority = builder.Configuration["JwtBearer:Authority"];
+                options.Audience = "Posts.WebApi";
             });
         var app = builder.Build();
 

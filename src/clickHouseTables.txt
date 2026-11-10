@@ -1,8 +1,6 @@
-docker exec -it clickhouse clickhouse-client --user grafana_user --password securepass --database analytics_db
-
 CREATE TABLE IF NOT EXISTS post_analytics
 (
-    event_time DateTime,
+    event_time DateTime('UTC'),
     event_type String,
     content_quality Float32,
     sentiment_score Float32,
@@ -13,3 +11,40 @@ CREATE TABLE IF NOT EXISTS post_analytics
 )
 ENGINE = MergeTree()
 ORDER BY (event_time, event_type);
+
+ALTER TABLE post_analytics
+    ADD COLUMN IF NOT EXISTS final_score Nullable(Float64),
+    ADD COLUMN IF NOT EXISTS scoring_version Nullable(String);
+
+ALTER TABLE post_analytics MODIFY SETTING non_replicated_deduplication_window = 10000;
+
+CREATE TABLE IF NOT EXISTS post_consensus
+(
+    commitment String,
+    status String,
+    positive_votes UInt32,
+    validator_count UInt32,
+    quorum UInt32
+)
+ENGINE = ReplacingMergeTree()
+ORDER BY (commitment, status, positive_votes, validator_count, quorum);
+
+CREATE VIEW IF NOT EXISTS post_analytics_with_consensus AS
+SELECT
+    a.event_time AS event_time,
+    a.event_type AS event_type,
+    a.content_quality AS content_quality,
+    a.sentiment_score AS sentiment_score,
+    a.toxicity_score AS toxicity_score,
+    a.commitment AS commitment,
+    a.proof_generated AS proof_generated,
+    coalesce(nullIf(c.status, ''), a.consensus_result) AS consensus_result,
+    a.final_score AS final_score,
+    a.scoring_version AS scoring_version
+FROM post_analytics AS a
+LEFT JOIN
+(
+    SELECT commitment, argMax(status, multiIf(status = 'APPROVED', 2, status = 'POST_NOT_FOUND', 1, 0)) AS status
+    FROM post_consensus
+    GROUP BY commitment
+) AS c ON a.commitment = c.commitment;

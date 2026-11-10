@@ -15,6 +15,7 @@ namespace Users.Infrastructure.Data
         public DbSet<BannedUser> BannedUsers { get; set; }
         public DbSet<Follow> Follows { get; set; }
         public DbSet<Post> Posts { get; set; }
+        public DbSet<ReputationAward> ReputationAwards { get; set; }
         public DbSet<SavedPost> SavedPosts { get; set; }
         public DbSet<Sex> Sexes { get; set; }
         public DbSet<User> Users { get; set; }
@@ -23,6 +24,8 @@ namespace Users.Infrastructure.Data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.ApplyConfigurationsFromAssembly(typeof(UserDbContext).Assembly);
+            modelBuilder.Entity<ReputationAward>().HasKey(award => award.PostId);
+            modelBuilder.Entity<ReputationAward>().Property(award => award.PostId).ValueGeneratedNever();
             base.OnModelCreating(modelBuilder);
         }
     }

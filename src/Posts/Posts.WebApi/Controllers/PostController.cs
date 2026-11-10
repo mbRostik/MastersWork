@@ -5,12 +5,14 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Posts.Application.Contracts.DTOs;
 using Posts.Application.Contracts.Validators;
+using Posts.Application.Services;
 using Posts.Application.UseCases.Commands;
 using Posts.Application.UseCases.Handlers.OperationHandlers;
 using Posts.Application.UseCases.Queries;
 using Posts.Domain.Entities;
 using Posts.Infrastructure.Data;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -21,6 +23,8 @@ namespace Posts.WebApi.Controllers
     [Authorize]
     public class PostController : ControllerBase
     {
+        internal const string PostAuthorScheme = "SignedPostAuthor";
+
         private readonly IMediator mediator;
         private readonly Serilog.ILogger logger;
         private readonly PostDbContext dbContext;
@@ -33,11 +37,47 @@ namespace Posts.WebApi.Controllers
 
         [AllowAnonymous]
         [HttpGet("GetUserPostByCommitment/{commitment}")]
-        public async Task<ActionResult<Post>> GetUserPostByCommitment(string commitment)
+        public async Task<IActionResult> GetUserPostByCommitment(string commitment,
+            [FromServices] IConfiguration configuration, CancellationToken cancellationToken)
         {
-            var post = await dbContext.Posts.FirstOrDefaultAsync(p => p.Commitment == commitment);
-            return Ok(post);
+            if (!HasServiceToken(configuration["REPUTATION_SERVICE_TOKEN"]))
+                return Unauthorized();
+
+            var owner = await dbContext.Posts
+                .Where(p => p.Commitment == commitment && p.CommitmentSalt != null)
+                .Select(p => new { PostId = p.Id, p.UserId })
+                .SingleOrDefaultAsync(cancellationToken);
+
+            return owner == null ? NotFound() : Ok(owner);
         }
+
+        [AllowAnonymous]
+        [HttpGet("reputation-witness/{commitment}")]
+        [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+        public async Task<IActionResult> GetReputationWitness(string commitment,
+            [FromServices] IConfiguration configuration, CancellationToken cancellationToken)
+        {
+            if (!HasServiceToken(configuration["POST_WITNESS_TOKEN"]))
+                return Unauthorized();
+
+            var post = await dbContext.Posts.AsNoTracking()
+                .SingleOrDefaultAsync(p => p.Commitment == commitment && p.CommitmentSalt != null, cancellationToken);
+
+            if (post?.CommitmentSalt == null)
+                return NotFound();
+
+            return Ok(new
+            {
+                PostId = post.Id,
+                post.UserId,
+                Text = PostProofCommitment.AnalysisText(post),
+                Salt = Convert.ToHexString(post.CommitmentSalt)
+            });
+        }
+
+        private bool HasServiceToken(string? token) => !string.IsNullOrWhiteSpace(token) &&
+            CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(Request.Headers.Authorization.ToString()),
+                Encoding.UTF8.GetBytes($"Bearer {token}"));
         
         [HttpGet("GetUserPosts")]
         public async Task<ActionResult<List<GiveProfilePostsDTO>>> GetUserPosts()
@@ -58,6 +98,7 @@ namespace Posts.WebApi.Controllers
             }
         }
 
+        [Authorize(AuthenticationSchemes = PostAuthorScheme)]
         [HttpPost("CreatePost")]
         public async Task<ActionResult> CreatePost([FromBody] CreatePostDTO model)
         {
@@ -70,6 +111,8 @@ namespace Posts.WebApi.Controllers
             }
 
             var userId = HttpContext.User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrWhiteSpace(userId))
+                return Forbid(PostAuthorScheme);
             logger.Information("Starting CreatePost for UserId {UserId}", userId);
 
             model.UserId = userId;

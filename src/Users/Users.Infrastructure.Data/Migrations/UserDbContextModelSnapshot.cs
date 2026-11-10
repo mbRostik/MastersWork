@@ -90,6 +90,15 @@ namespace Users.Infrastructure.Data.Migrations
                     b.ToTable("Posts");
                 });
 
+            modelBuilder.Entity("Users.Domain.Entities.ReputationAward", b =>
+                {
+                    b.Property<int>("PostId").HasColumnType("int");
+
+                    b.HasKey("PostId");
+
+                    b.ToTable("ReputationAwards");
+                });
+
             modelBuilder.Entity("Users.Domain.Entities.SavedPost", b =>
                 {
                     b.Property<string>("UserId")
