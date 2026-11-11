@@ -4,16 +4,19 @@
   "POST_SERVICE_URL": "https://localhost:7028",
   "REPUTATION_URL": "https://localhost:7075/user/updatereputation",
   "REPUTATION_CA_FILE": null,
-  "RABBITMQ_URL": "amqp://guest:guest@localhost//",
+  "RABBITMQ_URL": null,
+  "RABBITMQ_USER": "trust_system",
+  "RABBITMQ_PASSWORD": "",
   "CLICKHOUSE_HOST": "localhost",
   "CLICKHOUSE_PORT": 9000,
   "CLICKHOUSE_USER": "grafana_user",
-  "CLICKHOUSE_PASSWORD": "securepass",
+  "CLICKHOUSE_PASSWORD": "",
   "CLICKHOUSE_DB": "analytics_db",
   "NLP_MODELS_PATH": null,
   "ZKP_ARTIFACT_DIR": null,
   "TRUST_SKIP_DOCKER": false,
   "CONSENSUS_VALIDATOR_CONFIG": null,
   "CONSENSUS_VOTE_TIMEOUT": 15,
-  "CONSENSUS_CA_FILE": null
+  "CONSENSUS_CA_FILE": null,
+  "GF_SECURITY_ADMIN_PASSWORD": ""
 }

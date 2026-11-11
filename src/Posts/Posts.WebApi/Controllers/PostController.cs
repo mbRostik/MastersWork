@@ -100,7 +100,7 @@ namespace Posts.WebApi.Controllers
 
         [Authorize(AuthenticationSchemes = PostAuthorScheme)]
         [HttpPost("CreatePost")]
-        public async Task<ActionResult> CreatePost([FromBody] CreatePostDTO model)
+        public async Task<ActionResult> CreatePost([FromBody] CreatePostDTO model, CancellationToken cancellationToken)
         {
             var validator = new CreatePostDTOValidator();
             var validationResult = validator.Validate(model);
@@ -119,7 +119,7 @@ namespace Posts.WebApi.Controllers
 
             try
             {
-                var result = await mediator.Send(new CreatePostCommand(model));
+                var result = await mediator.Send(new CreatePostCommand(model), cancellationToken);
                 if (result)
                 {
                     logger.Information("Post created successfully for UserId {UserId}", userId);
@@ -127,6 +127,10 @@ namespace Posts.WebApi.Controllers
                 }
                 logger.Warning("Failed to create post for UserId {UserId}", userId);
                 return BadRequest("There was a problem while creating the post");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {

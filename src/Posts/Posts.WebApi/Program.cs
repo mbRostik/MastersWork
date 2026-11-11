@@ -45,7 +45,11 @@ public class Program
         //        listenOptions.Protocols = HttpProtocols.Http2;
         //    });
         //});
-        builder.Services.AddHttpClient();
+        builder.Services.AddHttpClient(PostCreatedHandler.CategoryClient, client =>
+        {
+            client.BaseAddress = new Uri(builder.Configuration["POST_CATEGORY_SERVICE_URL"] ?? "http://127.0.0.1:8000");
+            client.Timeout = TimeSpan.FromSeconds(5);
+        });
         builder.Host.UseSerilog((context, configuration) =>
         {
             configuration.Enrich.FromLogContext()
@@ -79,13 +83,20 @@ public class Program
         builder.Services.AddMassTransit(x =>
         {
             x.AddConsumer<UserCreation_Consumer>();
+            x.AddEntityFrameworkOutbox<PostDbContext>(outbox =>
+            {
+                outbox.UseSqlServer();
+                outbox.UseBusOutbox();
+            });
 
             x.UsingRabbitMq((context, cfg) =>
             {
                 cfg.Host("localhost", "/", h =>
                 {
-                    h.Username("guest");
-                    h.Password("guest");
+                    h.Username(builder.Configuration["RABBITMQ_USER"]
+                        ?? throw new InvalidOperationException("Configure RABBITMQ_USER."));
+                    h.Password(builder.Configuration["RABBITMQ_PASSWORD"]
+                        ?? throw new InvalidOperationException("Configure RABBITMQ_PASSWORD."));
                 });
 
                 cfg.Publish<IUserCreate_SendEvent_From_PostWebApi>(p => p.ExchangeType = ExchangeType.Fanout);

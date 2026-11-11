@@ -27,26 +27,14 @@ namespace Posts.Application.UseCases.Handlers.NotifyHandlers
         {
             logger.Information("Handling PostCreatedNotification for PostId: {PostId}", notification.item.Id);
 
-            try
+            PostCreationDTO creationEvent = new PostCreationDTO
             {
-                PostCreationDTO creationEvent = new PostCreationDTO
-                {
-                    PostId = notification.item.Id,
-                    CreatorId = notification.item.UserId,
-                    Status = MessageBus.Models.Statuses.PostCreationStatuses.PostWebApi_Created
-                };
-
-                await _publisher.Publish<IPostCreate_SendEvent_From_PostWebApi>(new { CorrelationId = Guid.NewGuid(), Data = creationEvent });
-
-
-                logger.Information("Publishing PostCreatedEvent PostId: {PostId}", creationEvent.PostId);
-
-                logger.Information("PostCreatedEvent for PostId: {PostId} published successfully", creationEvent.PostId);
-            }
-            catch (Exception ex)
-            {
-                logger.Error(ex, "Error handling PostCreatedNotification for PostId: {PostId}", notification.item.Id);
-            }
+                PostId = notification.item.Id,
+                CreatorId = notification.item.UserId,
+                Status = MessageBus.Models.Statuses.PostCreationStatuses.PostWebApi_Created
+            };
+            await _publisher.Publish<IPostCreate_SendEvent_From_PostWebApi>(
+                new { CorrelationId = Guid.NewGuid(), Data = creationEvent }, cancellationToken);
         }
     }
 }

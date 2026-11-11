@@ -4,6 +4,7 @@ import math
 import os
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 ROOT = Path(__file__).resolve().parent
@@ -11,10 +12,34 @@ STRING_SETTINGS = {
     "POST_WITNESS_TOKEN", "REPUTATION_SERVICE_TOKEN", "POST_SERVICE_URL", "REPUTATION_URL",
     "REPUTATION_CA_FILE", "RABBITMQ_URL", "CLICKHOUSE_HOST", "CLICKHOUSE_USER",
     "CLICKHOUSE_PASSWORD", "CLICKHOUSE_DB", "NLP_MODELS_PATH", "ZKP_ARTIFACT_DIR", "CONSENSUS_CA_FILE",
+    "RABBITMQ_USER", "RABBITMQ_PASSWORD", "GF_SECURITY_ADMIN_PASSWORD",
 }
 SETTINGS = STRING_SETTINGS | {
     "CLICKHOUSE_PORT", "TRUST_SKIP_DOCKER", "CONSENSUS_VALIDATOR_CONFIG", "CONSENSUS_VOTE_TIMEOUT",
 }
+
+
+def required_setting(environment, name):
+    value = environment.get(name)
+    if not value or not value.strip():
+        raise ValueError(f"Set {name} in trust-system.json or in the environment")
+    return value
+
+
+def rabbitmq_connection_options(environment):
+    if url := environment.get("RABBITMQ_URL"):
+        try:
+            parts = urlsplit(url)
+            if parts.scheme not in {"amqp", "amqps"} or not all((parts.hostname, parts.username, parts.password)):
+                raise ValueError
+        except ValueError:
+            raise ValueError("RABBITMQ_URL must contain an AMQP(S) host, username and password") from None
+        return {"url": url}
+    return {
+        "host": "localhost",
+        "login": required_setting(environment, "RABBITMQ_USER"),
+        "password": required_setting(environment, "RABBITMQ_PASSWORD"),
+    }
 
 
 def load_environment(path):
@@ -67,6 +92,14 @@ def main():
     path = ROOT / "trust-system.json"
     try:
         environment = load_environment(path)
+        rabbitmq_connection_options(environment)
+        required_setting(environment, "CLICKHOUSE_USER")
+        required_setting(environment, "CLICKHOUSE_PASSWORD")
+        if environment.get("TRUST_SKIP_DOCKER") != "1":
+            if environment.get("RABBITMQ_URL"):
+                raise ValueError("Use RABBITMQ_USER and RABBITMQ_PASSWORD for local Docker, or set TRUST_SKIP_DOCKER")
+            if environment["RABBITMQ_USER"] == "guest":
+                raise ValueError("Set a dedicated RABBITMQ_USER for the local Docker broker")
     except (OSError, ValueError) as error:
         parser.exit(1, f"{path.name}: {error}\n")
 

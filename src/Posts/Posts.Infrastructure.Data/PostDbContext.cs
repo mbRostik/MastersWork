@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Posts.Domain.Entities;
+using MassTransit;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -30,6 +31,9 @@ namespace Posts.Infrastructure.Data
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.AddInboxStateEntity();
+            modelBuilder.AddOutboxMessageEntity();
+            modelBuilder.AddOutboxStateEntity();
             modelBuilder.ApplyConfigurationsFromAssembly(typeof(PostDbContext).Assembly);
             base.OnModelCreating(modelBuilder);
         }

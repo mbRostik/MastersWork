@@ -34,9 +34,18 @@ services:
   rabbitmq:
     container_name: rabbitmq
     image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-}
+    entrypoint: ["/bin/sh", "-ec", "test -n \"$$RABBITMQ_DEFAULT_USER\" && test -n \"$$RABBITMQ_DEFAULT_PASS\" || { echo 'Set RABBITMQ_USER and RABBITMQ_PASSWORD' >&2; exit 1; }; exec docker-entrypoint.sh rabbitmq-server"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
 
   # --- NEW SERVICES BELOW ---
 
@@ -45,12 +54,18 @@ services:
     image: clickhouse/clickhouse-server:latest
     restart: always
     ports:
-      - "8123:8123" # HTTP interface (Used by Grafana)
-      - "9000:9000" # Native interface (Used by ClickHouse client)
+      - "127.0.0.1:${CLICKHOUSE_PORT:-9000}:9000"
+      - "127.0.0.1:8123:8123"
     environment:
-      - CLICKHOUSE_DB=analytics_db      # Creates this DB on startup
-      - CLICKHOUSE_USER=grafana_user    # Creates this user
-      - CLICKHOUSE_PASSWORD=securepass  # Sets the user's password
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-analytics_db}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+    entrypoint: ["/bin/sh", "-ec", "test -n \"$$CLICKHOUSE_USER\" && test -n \"$$CLICKHOUSE_PASSWORD\" || { echo 'Set CLICKHOUSE_USER and CLICKHOUSE_PASSWORD' >&2; exit 1; }; exec /entrypoint.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user \"$$CLICKHOUSE_USER\" --password \"$$CLICKHOUSE_PASSWORD\" --query 'SELECT 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
     volumes:
       - clickhouse_data:/var/lib/clickhouse
 
@@ -59,10 +74,11 @@ services:
     image: grafana/grafana:latest
     restart: always
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD
       - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource # Auto-installs ClickHouse plugin
+    entrypoint: ["/bin/sh", "-ec", "test -n \"$$GF_SECURITY_ADMIN_PASSWORD\" || { echo 'Set GF_SECURITY_ADMIN_PASSWORD' >&2; exit 1; }; exec /run.sh"]
     volumes:
       - grafana_data:/var/lib/grafana
     depends_on:

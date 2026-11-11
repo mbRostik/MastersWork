@@ -21,6 +21,7 @@ using Users.Application.Validators;
 using Users.Infrastructure.Data;
 using Users.Infrastructure.Services;
 using Users.Infrastructure.Services.grpcServices;
+using Users.WebApi.Controllers;
 
 var builder = WebApplication.CreateBuilder(args);
 string? connectionString = builder.Configuration.GetConnectionString("MSSQLConnection");
@@ -30,7 +31,8 @@ builder.Services.AddControllers();
 builder.Services.AddGrpc();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-builder.Services.AddHttpClient();
+builder.Services.AddHttpClient(UserController.PostOwnerClient, client => client.Timeout = TimeSpan.FromSeconds(4))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 
 builder.Services.AddScoped<IMapperService, MapperService>();
 builder.Services.AddFluentValidation(fv => fv.RegisterValidatorsFromAssemblyContaining<ChangeProfileInformationDTOValidator>());
@@ -82,8 +84,10 @@ builder.Services.AddMassTransit(x =>
     {
         cfg.Host("localhost", "/", h =>
         {
-            h.Username("guest");
-            h.Password("guest");
+            h.Username(builder.Configuration["RABBITMQ_USER"]
+                ?? throw new InvalidOperationException("Configure RABBITMQ_USER."));
+            h.Password(builder.Configuration["RABBITMQ_PASSWORD"]
+                ?? throw new InvalidOperationException("Configure RABBITMQ_PASSWORD."));
         });
         cfg.Publish<IUserCreate_SendEvent_From_UserWebApi>(p => p.ExchangeType = ExchangeType.Fanout);
         cfg.Publish<IPostCreate_SendEvent_From_UserWebApi>(p => p.ExchangeType = ExchangeType.Fanout);

@@ -60,8 +60,10 @@ builder.Services.AddMassTransit(x =>
     {
         cfg.Host("localhost", "/", h =>
         {
-            h.Username("guest");
-            h.Password("guest");
+            h.Username(builder.Configuration["RABBITMQ_USER"]
+                ?? throw new InvalidOperationException("Configure RABBITMQ_USER."));
+            h.Password(builder.Configuration["RABBITMQ_PASSWORD"]
+                ?? throw new InvalidOperationException("Configure RABBITMQ_PASSWORD."));
         });
 
         var inputUserQueue = "sagas-usercreation-processor";

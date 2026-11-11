@@ -1,4 +1,4 @@
-﻿using MassTransit;
+using MassTransit;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Posts.Application.Contracts.Interfaces;
@@ -7,13 +7,10 @@ using Posts.Application.UseCases.Commands;
 using Posts.Application.UseCases.Notifications;
 using Posts.Domain.Entities;
 using Posts.Infrastructure.Data;
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
-using System.Threading.Tasks;
+using System.Text.Json.Serialization;
 
 namespace Posts.Application.UseCases.Handlers.Creation
 {
@@ -35,271 +32,148 @@ namespace Posts.Application.UseCases.Handlers.Creation
 
     public class PostCreatedHandler : IRequestHandler<CreatePostCommand, bool>
     {
+        public const string CategoryClient = "PostCategories";
+
+        private sealed record CategoryPrediction([property: JsonPropertyName("predicted_categories")] string[]? Categories);
+
         private readonly IMediator mediator;
-
         private readonly PostDbContext dbContext;
-        private readonly IMapperService _mapper;
+        private readonly IMapperService mapperService;
         private readonly Serilog.ILogger logger;
-        private readonly IPublishEndpoint _publishEndpoint;
+        private readonly IPublishEndpoint publishEndpoint;
+        private readonly IHttpClientFactory httpClientFactory;
 
-        public PostCreatedHandler(PostDbContext dbContext, IMediator mediator, IMapperService mapper, Serilog.ILogger logger, IPublishEndpoint publishEndpoint)
+        public PostCreatedHandler(PostDbContext dbContext, IMediator mediator, IMapperService mapperService,
+            Serilog.ILogger logger, IPublishEndpoint publishEndpoint, IHttpClientFactory httpClientFactory)
         {
             this.dbContext = dbContext;
             this.mediator = mediator;
-            this._mapper = mapper;
+            this.mapperService = mapperService;
             this.logger = logger;
-            _publishEndpoint = publishEndpoint;
+            this.publishEndpoint = publishEndpoint;
+            this.httpClientFactory = httpClientFactory;
         }
 
         public async Task<bool> Handle(CreatePostCommand request, CancellationToken cancellationToken)
         {
-            var mapper = _mapper.InitializeAutomapper_CreatePostDTO_To_Post();
-
-            try
-            {
-                if (request.model.UserId == null || (request.model.Content == null && request.model.Title == null))
-                {
-                    return false;
-                }
-                Post temp = mapper.Map<Post>(request.model);
-                temp.Title ??= string.Empty;
-                temp.Content ??= string.Empty;
-                await using (var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken))
-                {
-                    dbContext.Posts.Add(temp);
-                    await dbContext.SaveChangesAsync(cancellationToken);
-
-                    temp.CommitmentSalt = RandomNumberGenerator.GetBytes(32);
-                    temp.Commitment = PostProofCommitment.Compute(temp, temp.CommitmentSalt);
-                    await dbContext.SaveChangesAsync(cancellationToken);
-                    await transaction.CommitAsync(cancellationToken);
-                }
-
-                await _publishEndpoint.Publish<IPostCreated_PublishEvent_From_PostWebApi>(new
-                {
-                    CorrelationId = Guid.NewGuid(),
-                    Data = new PostPublishedDto
-                    {
-                        PostId = temp.Id,
-                        Title = temp.Title,
-                        Content = temp.Content,
-                        UserId = temp.UserId,
-                        Commitment = temp.Commitment,
-                        CommitmentVersion = 1
-                    }
-                }, cancellationToken);
-
-                var model = dbContext.Entry(temp);
-                try
-                {
-                    using (var client = new HttpClient())
-                    {
-                        client.BaseAddress = new Uri("http://127.0.0.1:8000");
-
-                        var contentData = new
-                        {
-                            text = request.model.Title + ". " + request.model.Content
-                        };
-
-                        var jsonContent = new StringContent(
-                            JsonSerializer.Serialize(contentData),
-                            Encoding.UTF8,
-                            "application/json");
-
-                        var response = await client.PostAsync("/predict_category", jsonContent);
-
-                        if (response.IsSuccessStatusCode)
-                        {
-                            var responseContent = await response.Content.ReadAsStringAsync();
-
-                            var jsonDoc = JsonDocument.Parse(responseContent);
-                            var predictedCategories = jsonDoc.RootElement
-                                .GetProperty("predicted_categories")
-                                .EnumerateArray()
-                                .Select(element => element.GetString())
-                                .Where(x => !string.IsNullOrWhiteSpace(x))
-                                .Distinct()
-                                .ToList();
-
-                            var categoryIds = new HashSet<int>();
-
-                            foreach (var category in predictedCategories)
-                            {
-                                var existingCategory = await dbContext.PostTextCategories
-                                    .FirstOrDefaultAsync(c => c.CategoryName == category);
-
-                                if (existingCategory != null)
-                                {
-                                    categoryIds.Add(existingCategory.Id);
-                                }
-                                else
-                                {
-                                    var newCategory = new PostTextCategory
-                                    {
-                                        CategoryName = category
-                                    };
-
-                                    var tempCat = dbContext.PostTextCategories.Add(newCategory);
-                                    await dbContext.SaveChangesAsync();
-                                    categoryIds.Add(tempCat.Entity.Id);
-                                }
-                            }
-
-                            foreach (var categoryId in categoryIds)
-                            {
-                                bool alreadyExists = dbContext.PostsWithTextCategories
-                                    .Local.Any(x => x.PostId == model.Entity.Id && x.PostTextCategoryId == categoryId);
-
-                                if (!alreadyExists)
-                                {
-                                    dbContext.PostsWithTextCategories.Add(new PostWithTextCategories
-                                    {
-                                        PostId = model.Entity.Id,
-                                        PostTextCategoryId = categoryId
-                                    });
-                                }
-                            }
-
-                            await dbContext.SaveChangesAsync();
-
-                            //try
-                            //{
-                            //    using var textGraphClient = new HttpClient();
-                            //    textGraphClient.BaseAddress = new Uri("http://127.0.0.1:8002");
-
-                            //    var textGraphPayload = new
-                            //    {
-                            //        user_id = model.Entity.UserId.ToString(),
-                            //        post_id = model.Entity.Id.ToString(),
-                            //        text_categories = categoryIds
-                            //            .Select(id => id.ToString())
-                            //            .ToList()
-                            //    };
-
-                            //    var textContent = new StringContent(
-                            //        JsonSerializer.Serialize(textGraphPayload),
-                            //        Encoding.UTF8,
-                            //        "application/json");
-
-                            //    await textGraphClient.PostAsync("/update-graph", textContent);
-                            //}
-                            //catch (Exception ex)
-                            //{
-                            //    logger.Warning(ex, "Failed to update TEXT graph for PostId {PostId}", model.Entity.Id);
-                            //}
-                        }
-                        if (request.model.Files.Any())
-                        {
-                            using (var content = new MultipartFormDataContent())
-                            {
-                                foreach (var file in request.model.Files)
-                                {
-                                    var imageBytes = Convert.FromBase64String(file.Content);
-                                    var imageContent = new ByteArrayContent(imageBytes);
-                                    imageContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
-
-                                    // "files" must match FastAPI parameter name: List[UploadFile] = File(...)
-                                    content.Add(imageContent, "files", file.Name);
-                                }
-
-                                var photoResponse = await client.PostAsync("/predict_photo_category", content);
-
-                                if (photoResponse.IsSuccessStatusCode)
-                                {
-                                    var photoResponseContent = await photoResponse.Content.ReadAsStringAsync();
-
-                                    var photoJsonDoc = JsonDocument.Parse(photoResponseContent);
-                                    var photoCategories = photoJsonDoc.RootElement
-                                        .GetProperty("predicted_categories")
-                                        .EnumerateArray()
-                                        .Select(element => element.GetString())
-                                        .Distinct() // ✅ Prevent duplicates here
-                                        .ToList();
-
-                                    foreach (var photoCategory in photoCategories)
-                                    {
-                                        var existingPhotoCategory = await dbContext.PostPhotoCategories
-                                            .FirstOrDefaultAsync(c => c.CategoryName == photoCategory);
-
-                                        int photoCategoryId;
-                                        if (existingPhotoCategory != null)
-                                        {
-                                            photoCategoryId = existingPhotoCategory.Id;
-                                        }
-                                        else
-                                        {
-                                            var newPhotoCategory = new PostPhotoCategory
-                                            {
-                                                CategoryName = photoCategory
-                                            };
-                                            dbContext.PostPhotoCategories.Add(newPhotoCategory);
-                                            await dbContext.SaveChangesAsync();
-                                            photoCategoryId = newPhotoCategory.Id;
-                                        }
-
-                                        // Check if this relation already exists in memory to avoid EF conflict
-                                        bool alreadyTracked = dbContext.PostsWithPhotoCategories
-                                            .Local.Any(x => x.PostId == model.Entity.Id && x.PostPhotoCategoryId == photoCategoryId);
-
-                                        if (!alreadyTracked)
-                                        {
-                                            dbContext.PostsWithPhotoCategories.Add(new PostWithPhotoCategories
-                                            {
-                                                PostId = model.Entity.Id,
-                                                PostPhotoCategoryId = photoCategoryId
-                                            });
-                                        }
-                                    }
-
-                                    await dbContext.SaveChangesAsync();
-
-                                    //try
-                                    //{
-                                    //    using var photoGraphClient = new HttpClient();
-                                    //    photoGraphClient.BaseAddress = new Uri("http://127.0.0.1:8003");
-
-                                    //    var photoGraphPayload = new
-                                    //    {
-                                    //        user_id = model.Entity.UserId.ToString(),
-                                    //        post_id = model.Entity.Id.ToString(),
-                                    //        photo_categories = photoCategories
-                                    //    };
-
-                                    //    var photoContent = new StringContent(
-                                    //        JsonSerializer.Serialize(photoGraphPayload),
-                                    //        Encoding.UTF8,
-                                    //        "application/json");
-
-                                    //    await photoGraphClient.PostAsync("/update-photo-graph", photoContent);
-                                    //}
-                                    //catch (Exception ex)
-                                    //{
-                                    //    logger.Warning(ex, "Failed to update PHOTO graph for PostId {PostId}", model.Entity.Id);
-                                    //}
-                                }
-                            }
-                        }
-                       
-                        logger.Information("Post with ID {PostId} created successfully", model.Entity.Id);
-
-                    }
-                }
-                catch (HttpRequestException ex)
-                {
-                    logger.Warning(ex, "Category service unavailable for PostId {PostId}", temp.Id);
-                }
-
-                await mediator.Publish(new PostCreatedNotification(temp), cancellationToken);
-                return true;
-
-            }
-            catch (Exception ex)
-            {
-                logger.Error(ex, "Error creating post. {ErrorMessage}", ex.Message);
+            if (request.model.UserId == null || (request.model.Content == null && request.model.Title == null))
                 return false;
+
+            var mapper = mapperService.InitializeAutomapper_CreatePostDTO_To_Post();
+            var post = mapper.Map<Post>(request.model);
+            post.Title ??= string.Empty;
+            post.Content ??= string.Empty;
+
+            using var client = httpClientFactory.CreateClient(CategoryClient);
+            using var textContent = JsonContent.Create(new { text = post.Title + ". " + post.Content });
+            var textCategories = await PredictCategories(client, "/predict_category", textContent, cancellationToken);
+
+            var photoCategories = Array.Empty<string>();
+            if (post.Files?.Count > 0)
+            {
+                using var photos = new MultipartFormDataContent();
+                foreach (var file in post.Files)
+                {
+                    var image = new ByteArrayContent(file.file);
+                    image.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+                    photos.Add(image, "files", file.Name);
+                }
+                photoCategories = await PredictCategories(client, "/predict_photo_category", photos, cancellationToken);
             }
 
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+            dbContext.Posts.Add(post);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            post.CommitmentSalt = RandomNumberGenerator.GetBytes(32);
+            post.Commitment = PostProofCommitment.Compute(post, post.CommitmentSalt);
+
+            var textCategoryIds = new HashSet<int>();
+            foreach (var name in textCategories)
+            {
+                var category = await dbContext.PostTextCategories
+                    .FirstOrDefaultAsync(c => c.CategoryName == name, cancellationToken);
+                if (category == null)
+                {
+                    category = new PostTextCategory { CategoryName = name };
+                    dbContext.PostTextCategories.Add(category);
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                }
+                textCategoryIds.Add(category.Id);
+            }
+            foreach (var categoryId in textCategoryIds)
+            {
+                dbContext.PostsWithTextCategories.Add(new PostWithTextCategories
+                {
+                    PostId = post.Id,
+                    PostTextCategoryId = categoryId
+                });
+            }
+
+            var photoCategoryIds = new HashSet<int>();
+            foreach (var name in photoCategories)
+            {
+                var category = await dbContext.PostPhotoCategories
+                    .FirstOrDefaultAsync(c => c.CategoryName == name, cancellationToken);
+                if (category == null)
+                {
+                    category = new PostPhotoCategory { CategoryName = name };
+                    dbContext.PostPhotoCategories.Add(category);
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                }
+                photoCategoryIds.Add(category.Id);
+            }
+            foreach (var categoryId in photoCategoryIds)
+            {
+                dbContext.PostsWithPhotoCategories.Add(new PostWithPhotoCategories
+                {
+                    PostId = post.Id,
+                    PostPhotoCategoryId = categoryId
+                });
+            }
+
+            await publishEndpoint.Publish<IPostCreated_PublishEvent_From_PostWebApi>(new
+            {
+                CorrelationId = Guid.NewGuid(),
+                Data = new PostPublishedDto
+                {
+                    PostId = post.Id,
+                    Title = post.Title,
+                    Content = post.Content,
+                    UserId = post.UserId,
+                    Commitment = post.Commitment,
+                    CommitmentVersion = 1
+                }
+            }, cancellationToken);
+            await mediator.Publish(new PostCreatedNotification(post), cancellationToken);
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            logger.Information("Created PostId {PostId} and committed its outbox events", post.Id);
+            return true;
         }
 
+        private async Task<string[]> PredictCategories(HttpClient client, string path, HttpContent content,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                using var response = await client.PostAsync(path, content, cancellationToken);
+                response.EnsureSuccessStatusCode();
+                var prediction = await response.Content.ReadFromJsonAsync<CategoryPrediction>(cancellationToken);
+                if (prediction?.Categories == null)
+                {
+                    logger.Warning("Category response from {Path} did not contain predicted_categories", path);
+                    return [];
+                }
+                return prediction.Categories.Where(name => !string.IsNullOrWhiteSpace(name)).Distinct().ToArray();
+            }
+            catch (Exception ex) when (ex is HttpRequestException or JsonException
+                || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
+            {
+                logger.Warning(ex, "Category prediction failed for {Path}", path);
+                return [];
+            }
+        }
     }
 }

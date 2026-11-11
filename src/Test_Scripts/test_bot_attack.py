@@ -5,10 +5,12 @@ import logging
 import aio_pika
 import hashlib
 import time
+from pathlib import Path
+
+from launch_trust_system import load_environment, rabbitmq_connection_options
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
-RABBITMQ_URL = "amqp://guest:guest@localhost//"
 EXCHANGE_NAME = "Posts.Application.UseCases.Handlers.Creation:IPostCreated_PublishEvent_From_PostWebApi"
 
 def generate_spam_payload(index: int):
@@ -31,7 +33,8 @@ def generate_spam_payload(index: int):
     }
 
 async def main():
-    connection = await aio_pika.connect_robust(RABBITMQ_URL)
+    environment = load_environment(Path(__file__).resolve().parents[1] / "trust-system.json")
+    connection = await aio_pika.connect_robust(**rabbitmq_connection_options(environment), timeout=5)
     async with connection:
         channel = await connection.channel()
         exchange = await channel.declare_exchange(EXCHANGE_NAME, aio_pika.ExchangeType.FANOUT, durable=True)

@@ -4,32 +4,68 @@ import logging
 import math
 import os
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 
 import aio_pika
+from aio_pika.exceptions import AMQPError
 from clickhouse_driver import Client
+from clickhouse_driver.errors import ErrorCodes, NetworkError, ServerException, SocketTimeoutError
 
+from launch_trust_system import rabbitmq_connection_options, required_setting
 from reputation_zkp import is_commitment
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("AnalyticsService")
 
-RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost//")
 QUEUE_NAME = "analytics_queue"
 SCHEMA = Path(__file__).with_name("clickHouseTables.txt")
-ch_client = Client(
-    host=os.getenv("CLICKHOUSE_HOST", "localhost"),
-    port=int(os.getenv("CLICKHOUSE_PORT", "9000")),
-    user=os.getenv("CLICKHOUSE_USER", "grafana_user"),
-    password=os.getenv("CLICKHOUSE_PASSWORD", "securepass"),
-    database=os.getenv("CLICKHOUSE_DB", "analytics_db"),
-)
+CLICKHOUSE_ERRORS = (NetworkError, SocketTimeoutError, ServerException, ConnectionError, TimeoutError)
+CLICKHOUSE_RETRY_CODES = {
+    ErrorCodes.NETWORK_ERROR,
+    ErrorCodes.SOCKET_TIMEOUT,
+    ErrorCodes.TIMEOUT_EXCEEDED,
+    ErrorCodes.TOO_MANY_SIMULTANEOUS_QUERIES,
+}
 
 
-def initialize_schema():
+def create_clickhouse_client():
+    return Client(
+        host=os.getenv("CLICKHOUSE_HOST", "localhost"),
+        port=int(os.getenv("CLICKHOUSE_PORT", "9000")),
+        user=required_setting(os.environ, "CLICKHOUSE_USER"),
+        password=required_setting(os.environ, "CLICKHOUSE_PASSWORD"),
+        database=os.getenv("CLICKHOUSE_DB", "analytics_db"),
+        connect_timeout=5,
+        send_receive_timeout=10,
+        sync_request_timeout=5,
+        settings={"max_execution_time": 10},
+    )
+
+
+class ClickHouseUnavailable(Exception):
+    pass
+
+
+async def run_clickhouse(operation, *args, **kwargs):
+    # Socket timeouts terminate the driver's call before we reuse its connection.
+    for delay in (0.5, 1, None):
+        try:
+            return await asyncio.to_thread(operation, *args, **kwargs)
+        except CLICKHOUSE_ERRORS as error:
+            if isinstance(error, ServerException) and error.code not in CLICKHOUSE_RETRY_CODES:
+                raise
+            if delay is None:
+                raise ClickHouseUnavailable(f"ClickHouse failed after three attempts ({type(error).__name__})") from error
+            logger.warning("ClickHouse operation failed (%s). Retrying in %s seconds",
+                           type(error).__name__, delay)
+            await asyncio.sleep(delay)
+
+
+def initialize_schema(client):
     for statement in SCHEMA.read_text(encoding="utf-8").split(";"):
         if statement.strip():
-            ch_client.execute(statement)
+            client.execute(statement)
 
 
 def _probability(value):
@@ -80,7 +116,7 @@ def _analytics_insert(payload):
     )
 
 
-async def process_analytics_message(message):
+async def process_analytics_message(message, client):
     try:
         payload = json.loads(message.body)
         query, row = _analytics_insert(payload)
@@ -88,16 +124,25 @@ async def process_analytics_message(message):
         logger.warning("Discarding malformed analytics payload")
         return
 
-    settings = {"insert_deduplication_token": message.message_id} if message.message_id else None
-    await asyncio.to_thread(ch_client.execute, query, [row], settings=settings)
+    token = message.message_id or sha256(message.body).hexdigest()
+    await run_clickhouse(client.execute, query, [row], settings={
+        "async_insert": 0,
+        "insert_deduplicate": 1,
+        "insert_deduplication_token": token,
+    })
     logger.info("Saved %s event to ClickHouse", payload.get("action_type", "post"))
 
 
 async def main():
+    connection_options = rabbitmq_connection_options(os.environ)
+    client = create_clickhouse_client()
+    initialized = False
     while True:
         try:
-            await asyncio.to_thread(initialize_schema)
-            connection = await aio_pika.connect_robust(RABBITMQ_URL)
+            if not initialized:
+                await run_clickhouse(initialize_schema, client)
+                initialized = True
+            connection = await aio_pika.connect_robust(**connection_options, timeout=5)
             async with connection:
                 channel = await connection.channel()
                 await channel.set_qos(prefetch_count=1)
@@ -106,9 +151,12 @@ async def main():
                     logger.info("Listening for analytics and consensus outcomes")
                     async for message in queue_iter:
                         async with message.process(requeue=True):
-                            await process_analytics_message(message)
-        except Exception as error:
-            logger.error("Analytics delivery failed (%s). Retrying in 5 seconds", type(error).__name__)
+                            await process_analytics_message(message, client)
+        except ClickHouseUnavailable as error:
+            logger.error("%s. Pending delivery will be retried in 5 seconds", error)
+            await asyncio.sleep(5)
+        except (AMQPError, ConnectionError, TimeoutError) as error:
+            logger.error("Analytics broker unavailable (%s). Reconnecting in 5 seconds", type(error).__name__)
             await asyncio.sleep(5)
 
 

@@ -10,18 +10,19 @@ from pathlib import Path
 from typing import TypedDict
 
 import aio_pika
+from aio_pika.exceptions import AMQPError
 import httpx
 import torch
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from langgraph.graph import END, START, StateGraph
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
 
+from launch_trust_system import rabbitmq_connection_options
 from reputation_zkp import check_prover, generate_proof, is_commitment
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("TrustSystem.Agents")
 
-RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost//")
 EXCHANGE_NAME = "Posts.Application.UseCases.Handlers.Creation:IPostCreated_PublishEvent_From_PostWebApi"
 QUEUE_NAME = "python_post_subscriber_queue"
 POST_SERVICE_URL = os.getenv("POST_SERVICE_URL", "https://localhost:7028").rstrip("/")
@@ -114,6 +115,7 @@ async def publish_json(channel, queue, payload, message_id=None):
                          message_id=message_id),
         routing_key=queue,
         mandatory=True,
+        timeout=5,
     )
 
 
@@ -151,6 +153,10 @@ workflow.add_edge("publisher", END)
 agent_graph = workflow.compile()
 
 
+class InvalidWitnessResponse(Exception):
+    pass
+
+
 async def process_post(message, channel, client, analyzer):
     try:
         body = json.loads(message.body)
@@ -172,7 +178,15 @@ async def process_post(message, channel, client, analyzer):
             logger.info("Skipping post event because its post is no longer available")
             return
         response.raise_for_status()
-        witness = response.json()
+        try:
+            witness = response.json()
+            if (not isinstance(witness, dict)
+                    or not all(isinstance(witness.get(field), str) for field in ("text", "userId", "salt"))
+                    or type(witness.get("postId")) is not int
+                    or witness["postId"] <= 0 or len(bytes.fromhex(witness["salt"])) != 32):
+                raise ValueError("Invalid witness fields")
+        except (ValueError, RecursionError) as error:
+            raise InvalidWitnessResponse("Posts returned an invalid witness response") from error
         text = witness["text"]
     else:
         # Pre-migration events still produce analytics but have no private opening.
@@ -186,7 +200,7 @@ async def process_post(message, channel, client, analyzer):
         "post_witness": witness,
         "analyzer": analyzer,
         "timestamp": body.get("sentTime") or datetime.now(timezone.utc).isoformat(),
-        "event_id": message.message_id or (f"post:{commitment}" if witness is not None else None),
+        "event_id": message.message_id or (f"post:{commitment}" if commitment else None),
         "channel": channel,
     })
     logger.info(
@@ -197,12 +211,12 @@ async def process_post(message, channel, client, analyzer):
     )
 
 
-async def consume_rabbitmq_messages(analyzer, token):
+async def consume_rabbitmq_messages(analyzer, token, connection_options):
     tls = ssl.create_default_context(cafile=os.getenv("REPUTATION_CA_FILE") or None)
     async with httpx.AsyncClient(verify=tls, headers={"Authorization": f"Bearer {token}"}) as client:
         while True:
             try:
-                connection = await aio_pika.connect_robust(RABBITMQ_URL)
+                connection = await aio_pika.connect_robust(**connection_options, timeout=5)
                 async with connection:
                     channel = await connection.channel(on_return_raises=True)
                     await channel.set_qos(prefetch_count=1)
@@ -216,9 +230,23 @@ async def consume_rabbitmq_messages(analyzer, token):
                         async for message in queue_iter:
                             async with message.process(requeue=True):
                                 await process_post(message, channel, client, analyzer)
-            except Exception as error:
-                logger.error("Agent could not process messages (%s). Retrying in 5 seconds", type(error).__name__)
-                await asyncio.sleep(5)
+            except httpx.HTTPStatusError as error:
+                status = error.response.status_code
+                if status < 500 and status not in (408, 429):
+                    raise
+                logger.error("Posts witness lookup returned HTTP %d. Retrying in 5 seconds", status)
+            except httpx.RequestError as error:
+                logger.error("Posts witness lookup failed (%s). Retrying in 5 seconds", type(error).__name__)
+            except InvalidWitnessResponse as error:
+                logger.error("%s. Retrying in 5 seconds", error)
+            except (AMQPError, ConnectionError, TimeoutError) as error:
+                logger.error("Agent delivery failed (%s). Retrying in 5 seconds", type(error).__name__)
+            await asyncio.sleep(5)
+
+
+def log_consumer_exit(task):
+    if not task.cancelled() and (error := task.exception()) is not None:
+        logger.error("Post consumer stopped after an unexpected error", exc_info=error)
 
 
 @asynccontextmanager
@@ -226,9 +254,15 @@ async def lifespan(app: FastAPI):
     token = os.getenv("POST_WITNESS_TOKEN")
     if not token:
         raise RuntimeError("Set POST_WITNESS_TOKEN before starting AgentService")
+    post_url = httpx.URL(POST_SERVICE_URL)
+    if post_url.scheme != "https" or not post_url.host:
+        raise ValueError("POST_SERVICE_URL must be an absolute HTTPS URL")
+    connection_options = rabbitmq_connection_options(os.environ)
     await check_prover()
     analyzer = await asyncio.to_thread(TextAnalyzer)
-    task = asyncio.create_task(consume_rabbitmq_messages(analyzer, token))
+    task = asyncio.create_task(consume_rabbitmq_messages(analyzer, token, connection_options))
+    task.add_done_callback(log_consumer_exit)
+    app.state.consumer = task
     try:
         yield
     finally:
@@ -241,5 +275,7 @@ app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/")
-def read_root():
+def read_root(request: Request):
+    if request.app.state.consumer.done():
+        raise HTTPException(status_code=503, detail="Post consumer stopped")
     return {"status": "LangGraph AI Agent System is running and listening to RabbitMQ"}

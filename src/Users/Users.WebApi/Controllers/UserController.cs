@@ -29,6 +29,8 @@ namespace Users.WebApi.Controllers
     [Authorize]
     public class UserController : ControllerBase
     {
+        internal const string PostOwnerClient = "PostOwnerLookup";
+
         public class UpdateReputationRequest
         {
             public string? Commitment { get; set; }
@@ -45,7 +47,7 @@ namespace Users.WebApi.Controllers
             this.mediator = mediator;
             this.logger = logger;
             _UserDbContext = userDbContext;
-            _httpClient = httpClientFactory.CreateClient();
+            _httpClient = httpClientFactory.CreateClient(PostOwnerClient);
         }
 
         [HttpPost("updatereputation")]
@@ -62,15 +64,35 @@ namespace Users.WebApi.Controllers
                 return BadRequest();
 
             var postServiceUrl = (configuration["POST_SERVICE_URL"] ?? "https://localhost:7028").TrimEnd('/');
-            using var lookup = new HttpRequestMessage(System.Net.Http.HttpMethod.Get, $"{postServiceUrl}/post/GetUserPostByCommitment/{request.Commitment}");
-            lookup.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-            using var postResponse = await _httpClient.SendAsync(lookup, cancellationToken);
-            if (postResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
-                return NotFound();
-            if (!postResponse.IsSuccessStatusCode)
-                return StatusCode(StatusCodes.Status502BadGateway);
+            if (!Uri.TryCreate(postServiceUrl, UriKind.Absolute, out var postServiceUri)
+                || postServiceUri.Scheme != Uri.UriSchemeHttps)
+                throw new InvalidOperationException("POST_SERVICE_URL must be an absolute HTTPS URL.");
 
-            var owner = await postResponse.Content.ReadFromJsonAsync<PostOwner>(cancellationToken);
+            PostOwner? owner;
+            try
+            {
+                using var lookup = new HttpRequestMessage(System.Net.Http.HttpMethod.Get, $"{postServiceUrl}/post/GetUserPostByCommitment/{request.Commitment}");
+                lookup.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                using var postResponse = await _httpClient.SendAsync(lookup, cancellationToken);
+                if (postResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+                    return NotFound();
+                if (!postResponse.IsSuccessStatusCode)
+                {
+                    logger.Warning("Posts owner lookup returned HTTP {StatusCode}", (int)postResponse.StatusCode);
+                    return StatusCode(StatusCodes.Status502BadGateway);
+                }
+                owner = await postResponse.Content.ReadFromJsonAsync<PostOwner>(cancellationToken);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or JsonException)
+            {
+                logger.Warning(ex, "Posts owner lookup failed");
+                return StatusCode(StatusCodes.Status502BadGateway);
+            }
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                logger.Warning(ex, "Posts owner lookup timed out");
+                return StatusCode(StatusCodes.Status504GatewayTimeout);
+            }
             if (owner == null || owner.PostId <= 0 || string.IsNullOrWhiteSpace(owner.UserId))
                 return StatusCode(StatusCodes.Status502BadGateway);
 

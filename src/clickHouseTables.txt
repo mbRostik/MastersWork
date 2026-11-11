@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS post_consensus
 ENGINE = ReplacingMergeTree()
 ORDER BY (commitment, status, positive_votes, validator_count, quorum);
 
+ALTER TABLE post_consensus MODIFY SETTING non_replicated_deduplication_window = 10000;
+
 CREATE VIEW IF NOT EXISTS post_analytics_with_consensus AS
 SELECT
     a.event_time AS event_time,
